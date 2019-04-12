@@ -163,8 +163,27 @@ all_treatments <- FindClusters(all_treatments, resolution = .03, print.output = 
 # Run TSNE on PC data
 all_treatments <- RunTSNE(all_treatments, dims.use = 1:20, do.fast = T, dim_embed = 2)
 
-# Remove erythroid precursors
 
+# Find markers for each cluster
+cluster_marks = FindAllMarkers(all_treatments)
+
+# Cluster 3 appears to be erythroid precursors. Remove these cells and also filter other low quality cells.
+
+# Find cells with high absolute number of mitochondrial and HBB genes
+mito_genes = grep(pattern = "^mt-", x = rownames(x = all_treatments@data), value = TRUE)
+HBB_genes = grep(pattern = "^Hbb", x = rownames(x = all_treatments@data), value = TRUE)
+percent_mito = colSums(all_treatments@raw.data[mito_genes, ]) / colSums(all_treatments@raw.data)
+percent_HBB = colSums(all_treatments@raw.data[HBB_genes, ]) / colSums(all_treatments@raw.data)
+
+all_treatments@meta.data$percent_HBB = percent_HBB
+all_treatments@meta.data$percent_mito = percent_mito
+
+VlnPlot(all_treatments, c("percent_mito", "percent_HBB"))
+
+# Filter cells with HBB higher than 15% of reads from mitochondiral and/or 10% of reads from HBB 
+all_treatments = FilterCells(object = all_treatments, subset.names = c("percent_HBB", "percent_mito"), low.thresholds = c(-Inf, -Inf), high.thresholds = c(0.1, 0.15))
+
+# Remove remaning cells from 
 tmp = row.names(all_treatments@meta.data[all_treatments@meta.data$res.0.03 != 3,])
 
 all_treatments <- SubsetData(all_treatments, cells.use = tmp)
@@ -174,7 +193,7 @@ all_treatments <- SubsetData(all_treatments, cells.use = tmp)
 all_treatments <- FindVariableGenes(all_treatments, x.low.cutoff = 0.0125, y.cutoff = 1.5, do.contour = F, do.plot = T)
 
 # Compute PCs from the data - NOTE must run this way because the object is too large to scale data on my computer
-all_treatments <- ScaleData(all_treatments, genes.use = all_treatments@var.genes)
+all_treatments <- ScaleData(all_treatments, genes.use = all_treatments@var.genes, vars.to.regress = c("percent_mito","nUMI"))
 
 all_treatments <- RunPCA(all_treatments, pc.genes = all_treatments@var.genes)
 
@@ -185,7 +204,7 @@ PCElbowPlot(all_treatments)
 all_treatments <- BuildSNN(all_treatments, dims.use  = 1:20, force.recalc = T)
 
 # Remove old clusterings from metadata
-all_treatments@meta.data <- all_treatments@meta.data[,1:4]
+all_treatments@meta.data <- all_treatments@meta.data[,-5]
 
 # Find clusters bases on PCs
 all_treatments <- FindClusters(all_treatments, resolution = .02, print.output = 0, reuse.SNN = T)
@@ -194,17 +213,15 @@ all_treatments <- FindClusters(all_treatments, resolution = .05, print.output = 
 # Run TSNE on PC data
 all_treatments <- RunTSNE(all_treatments, dims.use = 1:20, do.fast = T, dim_embed = 2)
 
+# Add mayo sample IDs to the object
 current.cluster.ids = row.names(metadata)
 new.cluster.ids = metadata$Mayo.ID
 all_treatments@meta.data$Mayo_ID = plyr::mapvalues(x = all_treatments@meta.data$orig.ident, from = current.cluster.ids, to = new.cluster.ids)
 
+TSNEPlot(all_treatments)
 
 saveRDS(all_treatments, file = "Data/Mayo_Mouse/all_treatments_new.rds")
 
-
-tmp = table(all_treatments@meta.data$orig.ident)
-number_of_cells = all_treatments@meta.data$orig.ident
-for(i in 1:14){number_of_cells[number_of_cells == i] <- tmp[names(tmp) == i]}
 
 # MM cells
 FeaturePlot(all_treatments, c("Sdc1"))
@@ -226,10 +243,6 @@ FeaturePlot(all_treatments,  c("Fcgr3", "Ms4a7"))
 
 # Dendritic cells
 FeaturePlot(all_treatments,  c("Cst3", "Fcer1a"))
-
-# Megakaryocytes
-FeaturePlot(all_treatments,  "Ppbp")
-
 
 
 tmp = all_treatments@meta.data$res.0.05
